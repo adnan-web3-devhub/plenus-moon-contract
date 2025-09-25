@@ -141,180 +141,11 @@ interface IDEXRouter {
     ) external;
 }
 
-interface IDividendDistributor {
-    function setDistributionCriteria(uint256 _minPeriod, uint256 _minDistribution) external;
-    function setShare(address shareholder, uint256 amount) external;
-    function deposit() external payable;
-    function process(uint256 gas) external;
-}
 
-contract DividendDistributor is IDividendDistributor {
-    using SafeMath for uint256;
 
-    address _token;
 
-    struct Share {
-        uint256 amount;
-        uint256 totalExcluded;
-        uint256 totalRealised;
-    }
 
-    IPRC20 RWRD = IPRC20(0x95B303987A60C71504D99Aa1b13B4DA07b0790ab); // PLSX Reward Address
-    address WPLS = 0xA1077a294dDE1B09bB078844df40758a5D0f9a27;
-    IDEXRouter router;
-
-    address[] shareholders;
-    mapping (address => uint256) shareholderIndexes;
-    mapping (address => uint256) shareholderClaims;
-
-    mapping (address => Share) public shares;
-
-    uint256 public totalShares;
-    uint256 public totalDividends;
-    uint256 public totalDistributed;
-    uint256 public dividendsPerShare;
-    uint256 public dividendsPerShareAccuracyFactor = 10 ** 36;
-
-    uint256 public minPeriod = 0;
-    uint256 public minDistribution = 0;
-
-    uint256 currentIndex;
-
-    bool initialized;
-    modifier initialization() {
-        require(!initialized);
-        _;
-        initialized = true;
-    }
-
-    modifier onlyToken() {
-        require(msg.sender == _token); _;
-    }
-
-    constructor (address _router) {
-        router = _router != address(0)
-            ? IDEXRouter(_router)
-            : IDEXRouter(0x165C3410fC91EF562C50559f7d2289fEbed552d9);
-        _token = msg.sender;
-    }
-
-    function setDistributionCriteria(uint256 _minPeriod, uint256 _minDistribution) external override onlyToken {
-        minPeriod = _minPeriod;
-        minDistribution = _minDistribution;
-    }
-
-    function setShare(address shareholder, uint256 amount) external override onlyToken {
-        if(shares[shareholder].amount > 0){
-            distributeDividend(shareholder);
-        }
-
-        if(amount > 0 && shares[shareholder].amount == 0){
-            addShareholder(shareholder);
-        }else if(amount == 0 && shares[shareholder].amount > 0){
-            removeShareholder(shareholder);
-        }
-
-        totalShares = totalShares.sub(shares[shareholder].amount).add(amount);
-        shares[shareholder].amount = amount;
-        shares[shareholder].totalExcluded = getCumulativeDividends(shares[shareholder].amount);
-    }
-
-    function deposit() external payable override onlyToken {
-        uint256 balanceBefore = RWRD.balanceOf(address(this));
-
-        address[] memory path = new address[](2);
-        path[0] = WPLS;
-        path[1] = address(RWRD);
-
-        router.swapExactETHForTokensSupportingFeeOnTransferTokens{value: msg.value}(
-            0,
-            path,
-            address(this),
-            block.timestamp
-        );
-
-        uint256 amount = RWRD.balanceOf(address(this)).sub(balanceBefore);
-
-        totalDividends = totalDividends.add(amount);
-        dividendsPerShare = dividendsPerShare.add(dividendsPerShareAccuracyFactor.mul(amount).div(totalShares));
-    }
-
-    function process(uint256 gas) external override onlyToken {
-        uint256 shareholderCount = shareholders.length;
-
-        if(shareholderCount == 0) { return; }
-
-        uint256 gasUsed = 0;
-        uint256 gasLeft = gasleft();
-
-        uint256 iterations = 0;
-
-        while(gasUsed < gas && iterations < shareholderCount) {
-            if(currentIndex >= shareholderCount){
-                currentIndex = 0;
-            }
-
-            if(shouldDistribute(shareholders[currentIndex])){
-                distributeDividend(shareholders[currentIndex]);
-            }
-
-            gasUsed = gasUsed.add(gasLeft.sub(gasleft()));
-            gasLeft = gasleft();
-            currentIndex++;
-            iterations++;
-        }
-    }
-    
-    function shouldDistribute(address shareholder) internal view returns (bool) {
-        return shareholderClaims[shareholder] + minPeriod < block.timestamp
-                && getUnpaidEarnings(shareholder) > minDistribution;
-    }
-
-    function distributeDividend(address shareholder) internal {
-        if(shares[shareholder].amount == 0){ return; }
-
-        uint256 amount = getUnpaidEarnings(shareholder);
-        if(amount > 0){
-            totalDistributed = totalDistributed.add(amount);
-            RWRD.transfer(shareholder, amount);
-            shareholderClaims[shareholder] = block.timestamp;
-            shares[shareholder].totalRealised = shares[shareholder].totalRealised.add(amount);
-            shares[shareholder].totalExcluded = getCumulativeDividends(shares[shareholder].amount);
-        }
-    }
-    
-    function claimDividend() external {
-        distributeDividend(msg.sender);
-    }
-
-    function getUnpaidEarnings(address shareholder) public view returns (uint256) {
-        if(shares[shareholder].amount == 0){ return 0; }
-
-        uint256 shareholderTotalDividends = getCumulativeDividends(shares[shareholder].amount);
-        uint256 shareholderTotalExcluded = shares[shareholder].totalExcluded;
-
-        if(shareholderTotalDividends <= shareholderTotalExcluded){ return 0; }
-
-        return shareholderTotalDividends.sub(shareholderTotalExcluded);
-    }
-
-    function getCumulativeDividends(uint256 share) internal view returns (uint256) {
-        return share.mul(dividendsPerShare).div(dividendsPerShareAccuracyFactor);
-    }
-
-    function addShareholder(address shareholder) internal {
-        shareholderIndexes[shareholder] = shareholders.length;
-        shareholders.push(shareholder);
-    }
-
-    function removeShareholder(address shareholder) internal {
-        shareholders[shareholderIndexes[shareholder]] = shareholders[shareholders.length-1];
-        shareholderIndexes[shareholders[shareholders.length-1]] = shareholderIndexes[shareholder];
-        shareholders.pop();
-    }
-}
-
-contract YakDao is IPRC20, Auth {
+contract PlenusMoon is IPRC20, Auth {
     using SafeMath for uint256;
 
     address WPLS = 0xA1077a294dDE1B09bB078844df40758a5D0f9a27;
@@ -330,26 +161,22 @@ contract YakDao is IPRC20, Auth {
     mapping (address => mapping (address => uint256)) _allowances;
 
     mapping (address => bool) isFeeExempt;
-    mapping (address => bool) isDividendExempt;
 
     bool public notliftoff = true;
 
-    uint256 public liquidityFee           = 5; // Auto 0.5% $ YAK/WPLS LP
-    uint256 public rewardFee              = 5; // 0.5% $PLSX Rewards
-    uint256 public buyburnFee             = 15; // 0.5% Buy and Burn $X , 0.5% Buy and Burn $SURF, 0.5% Buy and Burn $PTGC
-    uint256 public stakingFundFee         = 5; // 0.5% Staking Fund Fee
-    uint256 public PropertyOverheadFee    = 5; // 0.5% Property Overhead Fee
-    uint256 public LandDevelopmentFundFee = 10; // 1% Land Development Fund Fees
-    uint256 public burnFee                = 5; // 0.5% burn $YAK
-    uint256 public totalFee               = stakingFundFee + rewardFee + liquidityFee + PropertyOverheadFee + buyburnFee + LandDevelopmentFundFee;
+    uint256 public liquidityFee           = 10; // 1% Add Token/PLS LP
+    uint256 public launchFundFee          = 20; // 2% Next token Launch Funding
+    uint256 public buyburnFee             = 10; // 1% Buy and Burn of SURF
+    uint256 public charityFee             = 5; // 0.5% Charity
+    uint256 public burnFee                = 5; // 0.5% Burn Token
+    uint256 public totalFee               = liquidityFee + launchFundFee + charityFee + buyburnFee + burnFee;
     uint256 public feeDenominator         = 1000;
 
     uint256 public sellMultiplier  = 100;
 
     address public autoLiquidityReceiver;
-    address public stakingFundFeeReceiver;
-    address public LandDevelopmentFundFeeReceiver;
-    address public PropertyOverheadFeeReceiver;
+    address public launchFundFeeReceiver;
+    address public charityFeeReceiver;
 
     uint256 targetLiquidity = 100;
     uint256 targetLiquidityDenominator = 100;
@@ -359,44 +186,37 @@ contract YakDao is IPRC20, Auth {
 
     bool public tradingOpen = false;
 
-    DividendDistributor public distributor;
-    uint256 distributorGas = 2000000;
-
     bool public swapEnabled = true;
     uint256 public swapThreshold = _totalSupply * 10 / 10000; // 0.1% of supply
     bool inSwap;
     modifier swapping() { inSwap = true; _; inSwap = false; }
 
+    event AutoLiquify(uint256 amountPLS, uint256 amountBOG);
+
     constructor (
         string memory tokenName, 
         string memory tokenSymbol, 
         uint8 tokenDecimals, 
-        uint256 tokenTotalSupply
-    ) Auth(msg.sender) {
+        uint256 tokenTotalSupply,
+        address adminWallet
+    ) Auth(adminWallet) {
         _name = tokenName;
         _symbol = tokenSymbol;
         _decimals = tokenDecimals; 
         _totalSupply = tokenTotalSupply.mul(10**uint256(tokenDecimals));
         swapThreshold = _totalSupply * 10 / 10000;
+
         router = IDEXRouter(0x165C3410fC91EF562C50559f7d2289fEbed552d9);
         pair = IDEXFactory(router.factory()).createPair(WPLS, address(this));
         _allowances[address(this)][address(router)] = type(uint256).max;
 
-        distributor = new DividendDistributor(address(router));
+        isFeeExempt[adminWallet] = true;
+        autoLiquidityReceiver = adminWallet;
+        launchFundFeeReceiver = adminWallet;
+        charityFeeReceiver = adminWallet;
 
-        isFeeExempt[msg.sender] = true;
-
-        isDividendExempt[pair] = true;
-        isDividendExempt[address(this)] = true;
-        isDividendExempt[DEAD] = true;
-
-        autoLiquidityReceiver = msg.sender;
-        stakingFundFeeReceiver = msg.sender;
-        LandDevelopmentFundFeeReceiver = msg.sender;
-        PropertyOverheadFeeReceiver = msg.sender;
-
-        _balances[msg.sender] = _totalSupply;
-        emit Transfer(address(0), msg.sender, _totalSupply);
+        _balances[adminWallet] = _totalSupply;
+        emit Transfer(address(0), adminWallet, _totalSupply);
     }
 
     receive() external payable { }
@@ -447,17 +267,6 @@ contract YakDao is IPRC20, Auth {
         uint256 amountReceived = shouldTakeFee(sender, recipient) ? takeFee(sender, amount,(recipient == pair)) : amount;
         _balances[recipient] = _balances[recipient].add(amountReceived);
 
-        // Dividend tracker
-        if(!isDividendExempt[sender]) {
-            try distributor.setShare(sender, _balances[sender]) {} catch {}
-        }
-
-        if(!isDividendExempt[recipient]) {
-            try distributor.setShare(recipient, _balances[recipient]) {} catch {} 
-        }
-
-        try distributor.process(distributorGas) {} catch {}
-
         emit Transfer(sender, recipient, amountReceived);
         return true;
     }
@@ -477,50 +286,21 @@ contract YakDao is IPRC20, Auth {
     }
 
     function buyburn(uint256 amount) internal {
-        IPRC20 token1 = IPRC20(0x12828D4cdA7CBfAcd7586E54708A9b9674641bEd); //SURF
-        IPRC20 token2 = IPRC20(0xA6C4790cc7Aa22CA27327Cb83276F2aBD687B55b); //X
-        IPRC20 token3 = IPRC20(0x94534EeEe131840b1c0F61847c572228bdfDDE93); //PTGC
+        IPRC20 surf = IPRC20(0x12828D4cdA7CBfAcd7586E54708A9b9674641bEd); //SURF
 
         address[] memory path = new address[](2);
         path[0] = WPLS;
-        path[1] = address(token1);
+        path[1] = address(surf);
 
-        address[] memory path2 = new address[](2);
-        path2[0] = WPLS;
-        path2[1] = address(token2);
-
-        address[] memory path3 = new address[](2);
-        path3[0] = WPLS;
-        path3[1] = address(token3);
-
-        router.swapExactETHForTokensSupportingFeeOnTransferTokens{value: amount/3}(
+        router.swapExactETHForTokensSupportingFeeOnTransferTokens{value: amount}(
             0,
             path,
             address(this),
             block.timestamp
         );
 
-        router.swapExactETHForTokensSupportingFeeOnTransferTokens{value: amount/3}(
-            0,
-            path2,
-            address(this),
-            block.timestamp
-        );
-        
-        router.swapExactETHForTokensSupportingFeeOnTransferTokens{value: amount/3}(
-            0,
-            path3,
-            address(this),
-            block.timestamp
-        );
-
-        uint256 amount1 = token1.balanceOf(address(this));
-        uint256 amount2 = token2.balanceOf(address(this));
-        uint256 amount3 = token3.balanceOf(address(this));
-
-        token1.transfer(address(0x0000000000000000000000000000000000000369), amount1);
-        token2.transfer(address(0x0000000000000000000000000000000000000369), amount2);
-        token3.transfer(address(0x0000000000000000000000000000000000000369), amount3);
+        uint256 surfAmount = surf.balanceOf(address(this));
+        surf.transfer(DEAD, surfAmount);
     }
 
     function takeFee(address sender, uint256 amount, bool isSell) internal returns (uint256) {
@@ -592,59 +372,41 @@ contract YakDao is IPRC20, Auth {
         uint256 amountPLS = address(this).balance.sub(balanceBefore);
 
         uint256 totalPLSFee = totalFee.sub(dynamicLiquidityFee.div(2));
-        
-        uint256 amountPLSLiquidity = amountPLS.mul(dynamicLiquidityFee).div(totalPLSFee).div(2);
-        uint256 amountPLSReflection = amountPLS.mul(rewardFee).div(totalPLSFee);
-        uint256 amountPLSBuyburn = amountPLS.mul(buyburnFee).div(totalPLSFee);
-        uint256 amountPLSStakingFund = amountPLS.mul(stakingFundFee).div(totalPLSFee);
-        uint256 amountPLSLandDevelopmentFund = amountPLS.mul(LandDevelopmentFundFee).div(totalPLSFee);
-        uint256 amountPLSPropertyOverhead = amountPLS.mul(PropertyOverheadFee).div(totalPLSFee);
 
-        try distributor.deposit{value: amountPLSReflection}() {} catch {}
+        uint256 amountPLSLiquidity = amountPLS.mul(dynamicLiquidityFee).div(totalPLSFee).div(2);
+        uint256 amountPLSLaunchFund = amountPLS.mul(launchFundFee).div(totalPLSFee);
+        uint256 amountPLSBuyburn = amountPLS.mul(buyburnFee).div(totalPLSFee);
+        uint256 amountPLSCharity = amountPLS.mul(charityFee).div(totalPLSFee);
 
         if (amountPLSBuyburn > 0) {
             buyburn(amountPLSBuyburn);
         }
 
-        (bool tmpSuccess,) = payable(stakingFundFeeReceiver).call{value: amountPLSStakingFund, gas: 30000}("");
-        (tmpSuccess,) = payable(LandDevelopmentFundFeeReceiver).call{value: amountPLSLandDevelopmentFund, gas: 30000}("");
-        
+        (bool tmpSuccess,) = payable(charityFeeReceiver).call{value: amountPLSCharity, gas: 30000}("");
+
         // Supress warning msg
         tmpSuccess = false;
 
         addPLSLp(amountToLiquify,amountPLSLiquidity);
 
-        uint256 remainder = address(this).balance - amountPLSPropertyOverhead;
+        uint256 remainder = address(this).balance - amountPLSLaunchFund;
 
-        (bool tmpSuccess2,) = payable(PropertyOverheadFeeReceiver).call{value: amountPLSPropertyOverhead+remainder, gas: 30000}("");
+        (bool tmpSuccess2,) = payable(launchFundFeeReceiver).call{value: amountPLSLaunchFund+remainder, gas: 30000}("");
         // Supress warning msg
         tmpSuccess2 = false;
-    }
-
-    function setIsDividendExempt(address holder, bool exempt) external authorized {
-        require(holder != address(this) && holder != pair);
-        isDividendExempt[holder] = exempt;
-        if(exempt){
-            distributor.setShare(holder, 0);
-        }else{
-            distributor.setShare(holder, _balances[holder]);
-        }
     }
 
     function setIsFeeExempt(address holder, bool exempt) external authorized {
         isFeeExempt[holder] = exempt;
     }
 
-    function setFees(uint256 _liquidityFee, uint256 _rewardFee, uint256 _stakingFundFee, uint256 _LandDevelopmentFundFee, uint256 _PropertyOverheadFee, uint256 _burnFee, uint256 _buyburnFee) external authorized {
+    function setFees(uint256 _liquidityFee, uint256 _launchFundFee, uint256 _charityFee, uint256 _burnFee, uint256 _buyburnFee) external authorized {
         liquidityFee = _liquidityFee;
-        rewardFee = _rewardFee;
-        stakingFundFee = _stakingFundFee;
-        LandDevelopmentFundFee = _LandDevelopmentFundFee;
-        PropertyOverheadFee = _PropertyOverheadFee;
+        launchFundFee = _launchFundFee;
+        charityFee = _charityFee;
         burnFee = _burnFee;
         buyburnFee = _buyburnFee;
-        uint256 subtotalFee = _liquidityFee.add(_rewardFee).add(_stakingFundFee).add(_LandDevelopmentFundFee);
-        totalFee = subtotalFee.add(_PropertyOverheadFee).add(_buyburnFee);
+        totalFee = _liquidityFee + _launchFundFee + _charityFee + _burnFee + _buyburnFee;
         feeDenominator = 1000;
         require(totalFee < 55, "Fees cannot be more than 5%");
     }
@@ -656,11 +418,10 @@ contract YakDao is IPRC20, Auth {
         notliftoff = false;
     }
 
-    function setFeeReceivers(address _autoLiquidityReceiver, address _stakingFundFeeReceiver, address _LandDevelopmentFundFeeReceiver, address _PropertyOverheadFeeReceiver ) external authorized {
+    function setFeeReceivers(address _autoLiquidityReceiver, address _launchFundFeeReceiver, address _charityFeeReceiver ) external authorized {
         autoLiquidityReceiver = _autoLiquidityReceiver;
-        stakingFundFeeReceiver = _stakingFundFeeReceiver;
-        LandDevelopmentFundFeeReceiver = _LandDevelopmentFundFeeReceiver;
-        PropertyOverheadFeeReceiver = _PropertyOverheadFeeReceiver;
+        launchFundFeeReceiver = _launchFundFeeReceiver;
+        charityFeeReceiver = _charityFeeReceiver;
     }
 
     function setSwapBackSettings(bool _enabled, uint256 _amount) external authorized {
@@ -671,14 +432,6 @@ contract YakDao is IPRC20, Auth {
     function setTargetLiquidity(uint256 _target, uint256 _denominator) external authorized {
         targetLiquidity = _target;
         targetLiquidityDenominator = _denominator;
-    }
-
-    function setDistributionCriteria(uint256 _minPeriod, uint256 _minDistribution) external authorized {
-        distributor.setDistributionCriteria(_minPeriod, _minDistribution);
-    }
-
-    function setDistributorSettings(uint256 gas) external authorized {
-        distributorGas = gas;
     }
     
     function getCirculatingSupply() public view returns (uint256) {
@@ -692,7 +445,5 @@ contract YakDao is IPRC20, Auth {
     function isOverLiquified(uint256 target, uint256 accuracy) public view returns (bool) {
         return getLiquidityBacking(accuracy) > target;
     }
-
-event AutoLiquify(uint256 amountPLS, uint256 amountBOG);
 
 }
