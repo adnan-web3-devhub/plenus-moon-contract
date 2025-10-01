@@ -165,11 +165,12 @@ contract PlenusMoon is IPRC20, Auth {
     bool public notliftoff = true;
 
     uint256 public liquidityFee           = 10; // 1% Add Token/PLS LP
-    uint256 public launchFundFee          = 20; // 2% Next token Launch Funding
+    uint256 public launchFundFee          = 10; // 1% Next token Launch Funding
     uint256 public buyburnFee             = 10; // 1% Buy and Burn of SURF
     uint256 public charityFee             = 5; // 0.5% Charity
     uint256 public burnFee                = 5; // 0.5% Burn Token
-    uint256 public totalFee               = liquidityFee + launchFundFee + charityFee + buyburnFee + burnFee;
+    uint256 public faithfulHoldersFee     = 10; // 1% Faithful Holders
+    uint256 public totalFee               = liquidityFee + launchFundFee + charityFee + buyburnFee + burnFee + faithfulHoldersFee;
     uint256 public feeDenominator         = 1000;
 
     uint256 public sellMultiplier  = 100;
@@ -177,6 +178,7 @@ contract PlenusMoon is IPRC20, Auth {
     address public autoLiquidityReceiver;
     address public launchFundFeeReceiver;
     address public charityFeeReceiver;
+    address public faithfulHoldersFeeReceiver;
 
     uint256 targetLiquidity = 100;
     uint256 targetLiquidityDenominator = 100;
@@ -214,6 +216,7 @@ contract PlenusMoon is IPRC20, Auth {
         autoLiquidityReceiver = adminWallet;
         launchFundFeeReceiver = adminWallet;
         charityFeeReceiver = adminWallet;
+        faithfulHoldersFeeReceiver = adminWallet;
 
         _balances[adminWallet] = _totalSupply;
         emit Transfer(address(0), adminWallet, _totalSupply);
@@ -377,6 +380,7 @@ contract PlenusMoon is IPRC20, Auth {
         uint256 amountPLSLaunchFund = amountPLS.mul(launchFundFee).div(totalPLSFee);
         uint256 amountPLSBuyburn = amountPLS.mul(buyburnFee).div(totalPLSFee);
         uint256 amountPLSCharity = amountPLS.mul(charityFee).div(totalPLSFee);
+        uint256 amountPLSFaithfulHolders = amountPLS.mul(faithfulHoldersFee).div(totalPLSFee);
 
         if (amountPLSBuyburn > 0) {
             buyburn(amountPLSBuyburn);
@@ -387,9 +391,13 @@ contract PlenusMoon is IPRC20, Auth {
         // Supress warning msg
         tmpSuccess = false;
 
+        (bool tmpSuccess3,) = payable(faithfulHoldersFeeReceiver).call{value: amountPLSFaithfulHolders, gas: 30000}("");
+        // Supress warning msg
+        tmpSuccess3 = false;
+
         addPLSLp(amountToLiquify,amountPLSLiquidity);
 
-        uint256 remainder = address(this).balance - amountPLSLaunchFund;
+        uint256 remainder = address(this).balance - amountPLSLaunchFund - amountPLSFaithfulHolders;
 
         (bool tmpSuccess2,) = payable(launchFundFeeReceiver).call{value: amountPLSLaunchFund+remainder, gas: 30000}("");
         // Supress warning msg
@@ -400,13 +408,14 @@ contract PlenusMoon is IPRC20, Auth {
         isFeeExempt[holder] = exempt;
     }
 
-    function setFees(uint256 _liquidityFee, uint256 _launchFundFee, uint256 _charityFee, uint256 _burnFee, uint256 _buyburnFee) external authorized {
+    function setFees(uint256 _liquidityFee, uint256 _launchFundFee, uint256 _charityFee, uint256 _burnFee, uint256 _buyburnFee, uint256 _faithfulHoldersFee) external authorized {
         liquidityFee = _liquidityFee;
         launchFundFee = _launchFundFee;
         charityFee = _charityFee;
         burnFee = _burnFee;
         buyburnFee = _buyburnFee;
-        totalFee = _liquidityFee + _launchFundFee + _charityFee + _burnFee + _buyburnFee;
+        faithfulHoldersFee = _faithfulHoldersFee;
+        totalFee = _liquidityFee + _launchFundFee + _charityFee + _burnFee + _buyburnFee + _faithfulHoldersFee;
         feeDenominator = 1000;
         require(totalFee < 55, "Fees cannot be more than 5%");
     }
@@ -418,10 +427,11 @@ contract PlenusMoon is IPRC20, Auth {
         notliftoff = false;
     }
 
-    function setFeeReceivers(address _autoLiquidityReceiver, address _launchFundFeeReceiver, address _charityFeeReceiver ) external authorized {
+    function setFeeReceivers(address _autoLiquidityReceiver, address _launchFundFeeReceiver, address _charityFeeReceiver, address _faithfulHoldersFeeReceiver ) external authorized {
         autoLiquidityReceiver = _autoLiquidityReceiver;
         launchFundFeeReceiver = _launchFundFeeReceiver;
         charityFeeReceiver = _charityFeeReceiver;
+        faithfulHoldersFeeReceiver = _faithfulHoldersFeeReceiver;
     }
 
     function setSwapBackSettings(bool _enabled, uint256 _amount) external authorized {
