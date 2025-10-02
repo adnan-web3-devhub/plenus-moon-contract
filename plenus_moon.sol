@@ -199,9 +199,8 @@ contract PlenusMoon is IPRC20, Auth {
         string memory tokenName, 
         string memory tokenSymbol, 
         uint8 tokenDecimals, 
-        uint256 tokenTotalSupply,
-        address adminWallet
-    ) Auth(adminWallet) {
+        uint256 tokenTotalSupply
+    ) Auth(msg.sender) {
         _name = tokenName;
         _symbol = tokenSymbol;
         _decimals = tokenDecimals; 
@@ -212,14 +211,14 @@ contract PlenusMoon is IPRC20, Auth {
         pair = IDEXFactory(router.factory()).createPair(WPLS, address(this));
         _allowances[address(this)][address(router)] = type(uint256).max;
 
-        isFeeExempt[adminWallet] = true;
-        autoLiquidityReceiver = adminWallet;
-        launchFundFeeReceiver = adminWallet;
-        charityFeeReceiver = adminWallet;
-        faithfulHoldersFeeReceiver = adminWallet;
+        isFeeExempt[msg.sender] = true;
+        autoLiquidityReceiver = msg.sender;
+        launchFundFeeReceiver = msg.sender;
+        charityFeeReceiver = msg.sender;
+        faithfulHoldersFeeReceiver = msg.sender;
 
-        _balances[adminWallet] = _totalSupply;
-        emit Transfer(address(0), adminWallet, _totalSupply);
+        _balances[msg.sender] = _totalSupply;
+        emit Transfer(address(0), msg.sender, _totalSupply);
     }
 
     receive() external payable { }
