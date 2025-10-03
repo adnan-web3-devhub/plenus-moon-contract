@@ -168,9 +168,9 @@ contract PlenusMoon is IPRC20, Auth {
     uint256 public launchFundFee          = 10; // 1% Next token Launch Funding
     uint256 public buyburnFee             = 10; // 1% Buy and Burn of SURF
     uint256 public charityFee             = 5; // 0.5% Charity
-    uint256 public burnFee                = 5; // 0.5% Burn Token
+    uint256 public buyburnCoin1Fee        = 5; // 0.5% Burn Token
     uint256 public faithfulHoldersFee     = 10; // 1% Faithful Holders
-    uint256 public totalFee               = liquidityFee + launchFundFee + charityFee + buyburnFee + burnFee + faithfulHoldersFee;
+    uint256 public totalFee               = liquidityFee + launchFundFee + charityFee + buyburnFee + buyburnCoin1Fee + faithfulHoldersFee;
     uint256 public feeDenominator         = 1000;
 
     uint256 public sellMultiplier  = 100;
@@ -306,21 +306,35 @@ contract PlenusMoon is IPRC20, Auth {
     }
 
     function takeFee(address sender, uint256 amount, bool isSell) internal returns (uint256) {
-        
         uint256 multiplier = isSell ? sellMultiplier : 100;
         uint256 feeAmount = amount.mul(totalFee).mul(multiplier).div(feeDenominator * 100);
-        uint256 burnAmount = amount.mul(burnFee).div(feeDenominator);
 
-        if (burnAmount > 0){
-            _balances[DEAD] = _balances[DEAD].add(burnAmount);
-            emit Transfer(sender, DEAD, burnAmount);
-        }
 
         _balances[address(this)] = _balances[address(this)].add(feeAmount);
         emit Transfer(sender, address(this), feeAmount);
 
-        return amount.sub(feeAmount).sub(burnAmount);
+        return amount.sub(feeAmount);
     }
+
+    function buyburnCurrent(uint256 amount) internal {
+        address[] memory path = new address[](2);
+        path[0] = WPLS;
+        path[1] = address(this);
+
+        router.swapExactETHForTokensSupportingFeeOnTransferTokens{value: amount}(
+            0,
+            path,
+            address(this),
+            block.timestamp
+        );
+
+        uint256 tokenAmount = balanceOf(address(this));
+        _balances[address(this)] = _balances[address(this)].sub(tokenAmount);
+        _balances[DEAD] = _balances[DEAD].add(tokenAmount);
+        emit Transfer(address(this), DEAD, tokenAmount);
+    }
+
+
 
     function shouldSwapBack() internal view returns (bool) {
         return msg.sender != pair
@@ -378,11 +392,16 @@ contract PlenusMoon is IPRC20, Auth {
         uint256 amountPLSLiquidity = amountPLS.mul(dynamicLiquidityFee).div(totalPLSFee).div(2);
         uint256 amountPLSLaunchFund = amountPLS.mul(launchFundFee).div(totalPLSFee);
         uint256 amountPLSBuyburn = amountPLS.mul(buyburnFee).div(totalPLSFee);
+        uint256 amountPLSBuyburnCoin1 = amountPLS.mul(buyburnCoin1Fee).div(totalPLSFee);
         uint256 amountPLSCharity = amountPLS.mul(charityFee).div(totalPLSFee);
         uint256 amountPLSFaithfulHolders = amountPLS.mul(faithfulHoldersFee).div(totalPLSFee);
 
         if (amountPLSBuyburn > 0) {
             buyburn(amountPLSBuyburn);
+        }
+
+        if (amountPLSBuyburnCoin1 > 0) {
+            buyburnCurrent(amountPLSBuyburnCoin1);
         }
 
         (bool tmpSuccess,) = payable(charityFeeReceiver).call{value: amountPLSCharity, gas: 30000}("");
@@ -407,14 +426,14 @@ contract PlenusMoon is IPRC20, Auth {
         isFeeExempt[holder] = exempt;
     }
 
-    function setFees(uint256 _liquidityFee, uint256 _launchFundFee, uint256 _charityFee, uint256 _burnFee, uint256 _buyburnFee, uint256 _faithfulHoldersFee) external authorized {
+    function setFees(uint256 _liquidityFee, uint256 _launchFundFee, uint256 _charityFee, uint256 _buyburnCoin1Fee, uint256 _buyburnFee, uint256 _faithfulHoldersFee) external authorized {
         liquidityFee = _liquidityFee;
         launchFundFee = _launchFundFee;
         charityFee = _charityFee;
-        burnFee = _burnFee;
+        buyburnCoin1Fee = _buyburnCoin1Fee;
         buyburnFee = _buyburnFee;
         faithfulHoldersFee = _faithfulHoldersFee;
-        totalFee = _liquidityFee + _launchFundFee + _charityFee + _burnFee + _buyburnFee + _faithfulHoldersFee;
+        totalFee = _liquidityFee + _launchFundFee + _charityFee + _buyburnCoin1Fee + _buyburnFee + _faithfulHoldersFee;
         feeDenominator = 1000;
         require(totalFee < 55, "Fees cannot be more than 5%");
     }
